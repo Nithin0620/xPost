@@ -3,7 +3,6 @@
 An always-learning X/Twitter posting agent powered by **Hermes Agent** (Nous
 Research). It posts via the official X API, learns from its own engagement via
 a private profile scraper, and adapts volume to the day's trends.
-
 ## Structure
 
 ```

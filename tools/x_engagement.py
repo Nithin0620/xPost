@@ -5,7 +5,9 @@ Uses twscrape's X GraphQL implementation with your own account session on disk.
 Reads your profile only: last N posts, their public metrics, and top replies.
 
 Usage:
-  x_engagement.py --login "<user>" "<password>"             # one-time, stores session
+  x_engagement.py --login "<user>" "<password>" [--email "<email>" --email-pass "<app-password>"]
+                     # one-time, stores session (email needed for X verification;
+                     # email-pass lets twscrape read the code via IMAP automatically)
   x_engagement.py --fetch --handle <handle> [--limit 20]    # scrape + summarize
   x_engagement.py --selfcheck
 """
@@ -21,12 +23,13 @@ DATA = ROOT / "data"
 ENGAGEMENT_FILE = DATA / "engagement.jsonl"
 
 
-def login(username, password):
-    api = twscrape.API()
-    await_ = api.pool.add_account(username, password)
-    # add_account is sync-scheduled; force run via asyncio
+def login(username, password, email="", email_password=""):
     import asyncio
-    asyncio.run(api.pool.login_all())
+    api = twscrape.API()
+    async def run():
+        await api.pool.add_account(username, password, email, email_password)
+        await api.pool.login_all()
+    asyncio.run(run())
     print(f"logged in as {username}; session saved to accounts.db")
 
 
@@ -34,7 +37,7 @@ def fetch(handle, limit):
     import asyncio
     async def run():
         api = twscrape.API()
-        user = (await twscrape.gather(api.user_by_login(handle)))[0]
+        user = await api.user_by_login(handle)
         tweets = await twscrape.gather(api.user_tweets(user.id, limit=limit))
         rows = []
         for t in tweets:
@@ -92,6 +95,8 @@ def selfcheck():
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--login", nargs=2, metavar=("USERNAME", "PASSWORD"))
+    ap.add_argument("--email", default="")
+    ap.add_argument("--email-pass", default="")
     ap.add_argument("--fetch", action="store_true")
     ap.add_argument("--handle", default="")
     ap.add_argument("--limit", type=int, default=20)
@@ -100,7 +105,7 @@ if __name__ == "__main__":
     if a.selfcheck:
         selfcheck()
     elif a.login:
-        login(*a.login)
+        login(a.login[0], a.login[1], a.email, a.email_pass)
     elif a.fetch:
         fetch(a.handle, a.limit)
     else:

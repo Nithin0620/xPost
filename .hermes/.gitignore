@@ -13,3 +13,27 @@ pairing/
 auth.lock
 hooks/
 SOUL.md
+
+# generated runtime state
+auth.json
+backups/
+bin/
+install_id
+gateway*
+channel_directory.json
+runtime/
+state/
+state.db*
+migration/
+kanban.db*
+kanban/
+terminal-sessions/
+.hermes_history
+.install_id.lock
+.skills_prompt_snapshot.json
+.update_check
+models_dev_cache.*
+ollama_cloud_models_cache.json
+provider_models_cache.json
+skills/.curator_state
+skills/openclaw-imports/
