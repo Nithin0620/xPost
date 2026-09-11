@@ -1,0 +1,15 @@
+# runtime + secrets — never push
+.env
+accounts.db
+sessions/
+logs/
+cron/
+memories/
+state.db
+audio_cache/
+cache/
+image_cache/
+pairing/
+auth.lock
+hooks/
+SOUL.md

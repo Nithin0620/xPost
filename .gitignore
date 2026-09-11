@@ -1,0 +1,7 @@
+.venv/
+.env
+__pycache__/
+agent.log
+accounts.db
+data/
+*.log
