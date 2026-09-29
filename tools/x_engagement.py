@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Own-profile X engagement scraper (no official API).
+"""Own-profile X engagement scraper & direct session publisher (no official API).
 
 Uses twscrape's X GraphQL implementation with your own account session on disk.
 Reads your profile only: last N posts, their public metrics, and top replies.
+Supports publishing tweets directly via browser session cookies (free, no API keys needed).
 
 Auth (pick one — browser-session cookies work even when Cloudflare blocks logins):
   x_engagement.py --cookies <auth/x_cookies.json> --cookies-username <user>
@@ -10,8 +11,9 @@ Auth (pick one — browser-session cookies work even when Cloudflare blocks logi
   x_engagement.py --login "<user>" "<password>" [--email ... --email-pass ...]
                      # fallback password login (often blocked by Cloudflare)
 
-Then:
+Usage:
   x_engagement.py --fetch --handle <handle> [--limit 20]    # scrape + summarize
+  x_engagement.py --post "Your tweet text here"             # publish tweet via cookies
   x_engagement.py --selfcheck
 """
 import argparse
@@ -20,6 +22,7 @@ import sqlite3
 import sys
 from pathlib import Path
 
+import httpx
 import twscrape
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -107,7 +110,7 @@ def fetch(handle, limit):
                     "reply_count": inner.replyCount,
                     "quote_count": inner.quoteCount,
                 },
-                "views": t.viewCount,  # ponytail: viewCount lives only on outer RT tweet
+                "views": t.viewCount,
                 "sample_replies": [
                     {
                         "full_text": r.rawContent,
@@ -129,6 +132,101 @@ def fetch(handle, limit):
         save_engagement(new_rows)
         summarize(rows)
     asyncio.run(run())
+
+
+def post_tweet(text, cookies_path=None):
+    """Publish a tweet directly using browser session cookies via X GraphQL API."""
+    if not cookies_path:
+        cookies_path = ROOT / "auth" / "x_cookies.json"
+    raw_cookies = _load_cookies(cookies_path)
+    if isinstance(raw_cookies, list):
+        cookie_dict = {c["name"]: c["value"] for c in raw_cookies if "name" in c and "value" in c}
+    else:
+        cookie_dict = raw_cookies
+
+    auth_token = cookie_dict.get("auth_token")
+    ct0 = cookie_dict.get("ct0")
+    if not auth_token or not ct0:
+        print("ERROR: auth_token and ct0 cookies are required to post.", file=sys.stderr)
+        sys.exit(1)
+
+    headers = {
+        "authorization": "Bearer AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA",
+        "x-csrf-token": ct0,
+        "x-twitter-auth-type": "OAuth2Session",
+        "x-twitter-active-user": "yes",
+        "content-type": "application/json",
+        "user-agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+        "cookie": "; ".join(f"{k}={v}" for k, v in cookie_dict.items()),
+    }
+
+    query_ids = [
+        "5V_dkq1kcR8yTuhAuRwjwA",
+        "xTWhcN6AHGQmu_edUQcwEQ",
+        "oBukCustomer",
+    ]
+
+    features = {
+        "communities_web_enable_tweet_community_results_fetch": True,
+        "c9s_tweet_anatomy_moderator_badge_enabled": True,
+        "tweetypie_unmention_optimization_enabled": True,
+        "responsive_web_edit_tweet_api_enabled": True,
+        "graphql_is_translatable_rweb_tweet_is_translatable_enabled": True,
+        "view_counts_everywhere_api_enabled": True,
+        "longform_notetweets_consumption_enabled": True,
+        "responsive_web_twitter_article_tweet_consumption_enabled": True,
+        "tweet_awards_web_tipping_enabled": False,
+        "creator_subscriptions_quote_tweet_preview_enabled": False,
+        "freedom_of_speech_not_reach_fetch_enabled": True,
+        "standardized_nudges_misinfo": True,
+        "tweet_with_visibility_results_prefer_gql_limited_actions_policy_enabled": True,
+        "rweb_video_timestamps_enabled": True,
+        "longform_notetweets_rich_text_read_enabled": True,
+        "longform_notetweets_inline_media_enabled": True,
+        "rweb_tipjar_consumption_enabled": True,
+        "responsive_web_graphql_exclude_directive_enabled": True,
+        "verified_phone_label_enabled": False,
+        "responsive_web_graphql_skip_user_profile_image_extensions_enabled": False,
+        "responsive_web_graphql_timeline_navigation_enabled": True,
+        "responsive_web_enhance_cards_enabled": False,
+    }
+
+    for qid in query_ids:
+        url = f"https://x.com/i/api/graphql/{qid}/CreateTweet"
+        payload = {
+            "variables": {
+                "tweet_text": text,
+                "dark_request": False,
+                "media": {"media_entities": [], "possibly_sensitive": False},
+                "semantic_annotation_ids": [],
+            },
+            "features": features,
+            "queryId": qid,
+        }
+        try:
+            with httpx.Client(timeout=15.0) as client:
+                res = client.post(url, headers=headers, json=payload)
+                if res.status_code == 200:
+                    data = res.json()
+                    if "errors" in data and not data.get("data"):
+                        print(f"GraphQL note ({qid}): {data['errors']}", file=sys.stderr)
+                        continue
+                    tweet_result = (data.get("data", {})
+                                    .get("create_tweet", {})
+                                    .get("tweet_results", {})
+                                    .get("result", {}))
+                    tweet_id = tweet_result.get("rest_id", "")
+                    print(f"SUCCESS: Tweet published! ID: {tweet_id}")
+                    from x_db import save_post
+                    save_post("published", {"id": tweet_id or "tw_cookie", "text": text, "post_id": tweet_id})
+                    return {"id": tweet_id, "text": text, "status": "published"}
+                else:
+                    print(f"HTTP {res.status_code} ({qid}): {res.text[:160]}", file=sys.stderr)
+        except Exception as e:
+            print(f"Request failed ({qid}): {e}", file=sys.stderr)
+
+    print("ERROR: Failed to publish tweet with cookies.", file=sys.stderr)
+    sys.exit(1)
 
 
 def summarize(rows):
@@ -171,6 +269,7 @@ if __name__ == "__main__":
     ap.add_argument("--fetch", action="store_true")
     ap.add_argument("--handle", default="")
     ap.add_argument("--limit", type=int, default=20)
+    ap.add_argument("--post", metavar="TEXT", help="post a tweet directly using browser session cookies")
     ap.add_argument("--selfcheck", action="store_true")
     a = ap.parse_args()
     if a.selfcheck:
@@ -181,5 +280,7 @@ if __name__ == "__main__":
         login(a.login[0], a.login[1], a.email, a.email_pass)
     elif a.fetch:
         fetch(a.handle, a.limit)
+    elif a.post:
+        post_tweet(a.post)
     else:
         ap.print_help(); sys.exit(0)

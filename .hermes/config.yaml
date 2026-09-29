@@ -1,5 +1,5 @@
 model:
-  default: gemini-3.7-flash
+  default: gemini-2.5-flash
   provider: gemini
 database:
   journal_mode: wal

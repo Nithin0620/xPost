@@ -106,16 +106,14 @@ On the owner's reply:
   resend for approval.
 
 ### Phase 4 — Publish (only after explicit approval)
+Publish using the session cookie tool (100% free, no developer API credits needed):
 ```bash
-xurl post "THE APPROVED TWEET TEXT"
+cd /home/nithin/Projects/xPost && .venv/bin/python tools/x_engagement.py --post "THE APPROVED TWEET TEXT"
 ```
-Confirm success; on 429/401 wait and retry once, then report.
+*(Fallback if needed: `xurl post "THE APPROVED TWEET TEXT"`)*
 
-Record the publish in the DB (update the draft's status):
-```bash
-cd /home/nithin/Projects/xPost && .venv/bin/python tools/x_db.py save-post \
-  --status published --payload '{"id":"<same id>","text":"THE APPROVED TWEET TEXT","post_id":"<tweet id from xurl response>"}'
-```
+Confirm success; on 429/401 wait and retry once, then report.
+`x_engagement.py --post` automatically logs the published post into the DB.
 
 ### Phase 5 — Remember
 Save to persistent memory: what was posted today, why, any review feedback the

@@ -7,10 +7,12 @@ JSONL so the tool chain keeps working before Atlas is configured.
 Usage:
   x_db.py save-post --status draft --payload '<json>'       # agent saves a draft
   x_db.py save-post --status published --payload '<json>'   # agent saves a publish
+  x_db.py list-posts [--status draft|published] [--limit 20]
 """
 import argparse
 import json
 import os
+import sys
 import time
 from pathlib import Path
 
@@ -75,19 +77,63 @@ def save_post(status, payload):
         _append_local(POSTS_FILE, doc)
 
 
+def list_posts(status=None, limit=20):
+    posts = []
+    if _uri():
+        col = _collection("posts")
+        query = {"status": status} if status else {}
+        cursor = col.find(query).sort("updated_at", -1).limit(limit)
+        posts = list(cursor)
+    else:
+        if POSTS_FILE.exists():
+            posts = [json.loads(l) for l in POSTS_FILE.read_text().splitlines()]
+            if status:
+                posts = [p for p in posts if p.get("status") == status]
+            posts = posts[-limit:][::-1]
+    print(json.dumps(posts, indent=2))
+    return posts
+
+
 def _now():
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
 
-if __name__ == "__main__":
-    ap = argparse.ArgumentParser()
+def parse_args():
+    # Support both subcommand style ("save-post", "list-posts") and flag style ("--save-post", "--list-posts")
+    ap = argparse.ArgumentParser(description="xPost durable database tool")
+    subparsers = ap.add_subparsers(dest="subcommand")
+
+    # save-post subcommand
+    p_save = subparsers.add_parser("save-post", help="Save a draft or published post")
+    p_save.add_argument("--status", choices=["draft", "published"], required=True)
+    p_save.add_argument("--payload", required=True, help="JSON string payload")
+
+    # list-posts subcommand
+    p_list = subparsers.add_parser("list-posts", help="List recent posts")
+    p_list.add_argument("--status", choices=["draft", "published"], default=None)
+    p_list.add_argument("--limit", type=int, default=20)
+
+    # Legacy flags on root parser
     ap.add_argument("--save-post", action="store_true")
+    ap.add_argument("--list-posts", action="store_true")
     ap.add_argument("--status", choices=["draft", "published"])
     ap.add_argument("--payload", default="")
-    a = ap.parse_args()
-    if a.save_post:
-        if not a.status or not a.payload:
-            ap.error("--save-post requires --status and --payload")
-        save_post(a.status, a.payload)
+    ap.add_argument("--limit", type=int, default=20)
+
+    return ap.parse_args()
+
+
+if __name__ == "__main__":
+    args = parse_args()
+    if args.subcommand == "save-post" or args.save_post:
+        status = args.status
+        payload = args.payload
+        if not status or not payload:
+            print("ERROR: save-post requires --status and --payload", file=sys.stderr)
+            sys.exit(1)
+        save_post(status, payload)
+    elif args.subcommand == "list-posts" or args.list_posts:
+        list_posts(status=args.status, limit=args.limit)
     else:
-        ap.print_help()
+        print("Usage: x_db.py [save-post|list-posts] [options]")
+        sys.exit(0)
