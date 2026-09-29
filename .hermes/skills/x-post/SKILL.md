@@ -73,6 +73,11 @@ These become STANDING RULES:
 4. Research today's trends/news (web search).
 5. Draft 1-2 candidate tweets. For each, include WHY you chose it (trend
    signal, requested topic/repo, or past-performance pattern).
+6. Store every draft immediately (pre-approval) so history lives in the DB:
+   ```bash
+   cd /home/nithin/Projects/xPost && .venv/bin/python tools/x_db.py save-post \
+     --status draft --payload '{"id":"<tweet id or short slug>","text":"<draft text>","why":"<rationale>"}'
+   ```
 
 ### Phase 2 — Send for review (Telegram)
 Send to the owner in Telegram:
@@ -105,6 +110,12 @@ On the owner's reply:
 xurl post "THE APPROVED TWEET TEXT"
 ```
 Confirm success; on 429/401 wait and retry once, then report.
+
+Record the publish in the DB (update the draft's status):
+```bash
+cd /home/nithin/Projects/xPost && .venv/bin/python tools/x_db.py save-post \
+  --status published --payload '{"id":"<same id>","text":"THE APPROVED TWEET TEXT","post_id":"<tweet id from xurl response>"}'
+```
 
 ### Phase 5 — Remember
 Save to persistent memory: what was posted today, why, any review feedback the
