@@ -18,6 +18,7 @@ Usage:
 """
 import argparse
 import json
+import re
 import sqlite3
 import sys
 from pathlib import Path
@@ -134,6 +135,26 @@ def fetch(handle, limit):
     asyncio.run(run())
 
 
+def _resolve_create_tweet_query_id(cookie_dict):
+    known = "WNkbkQ_JLIofjdukTXahVA"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+        "cookie": "; ".join(f"{k}={v}" for k, v in cookie_dict.items()),
+    }
+    try:
+        with httpx.Client(follow_redirects=True, timeout=8.0, headers=headers) as client:
+            r = client.get("https://x.com/home")
+            js_match = re.search(r'https://abs\.twimg\.com/responsive-web/client-web/main\.[a-zA-Z0-9]+\.js', r.text)
+            if js_match:
+                main_js = client.get(js_match.group(0)).text
+                m = re.search(r'queryId:\"([^\"]+)\",operationName:\"CreateTweet\"', main_js)
+                if m:
+                    return m.group(1)
+    except Exception:
+        pass
+    return known
+
+
 def post_tweet(text, cookies_path=None):
     """Publish a tweet directly using browser session cookies via X GraphQL API."""
     if not cookies_path:
@@ -160,11 +181,8 @@ def post_tweet(text, cookies_path=None):
         "cookie": "; ".join(f"{k}={v}" for k, v in cookie_dict.items()),
     }
 
-    query_ids = [
-        "5V_dkq1kcR8yTuhAuRwjwA",
-        "xTWhcN6AHGQmu_edUQcwEQ",
-        "oBukCustomer",
-    ]
+    qid = _resolve_create_tweet_query_id(cookie_dict)
+    query_ids = [qid, "WNkbkQ_JLIofjdukTXahVA", "5V_dkq1kcR8yTuhAuRwjwA"]
 
     features = {
         "communities_web_enable_tweet_community_results_fetch": True,
@@ -191,8 +209,12 @@ def post_tweet(text, cookies_path=None):
         "responsive_web_enhance_cards_enabled": False,
     }
 
-    for qid in query_ids:
-        url = f"https://x.com/i/api/graphql/{qid}/CreateTweet"
+    seen = set()
+    for q in query_ids:
+        if q in seen:
+            continue
+        seen.add(q)
+        url = f"https://x.com/i/api/graphql/{q}/CreateTweet"
         payload = {
             "variables": {
                 "tweet_text": text,
@@ -201,7 +223,7 @@ def post_tweet(text, cookies_path=None):
                 "semantic_annotation_ids": [],
             },
             "features": features,
-            "queryId": qid,
+            "queryId": q,
         }
         try:
             with httpx.Client(timeout=15.0) as client:
@@ -209,7 +231,7 @@ def post_tweet(text, cookies_path=None):
                 if res.status_code == 200:
                     data = res.json()
                     if "errors" in data and not data.get("data"):
-                        print(f"GraphQL note ({qid}): {data['errors']}", file=sys.stderr)
+                        print(f"GraphQL note ({q}): {data['errors']}", file=sys.stderr)
                         continue
                     tweet_result = (data.get("data", {})
                                     .get("create_tweet", {})
@@ -221,9 +243,9 @@ def post_tweet(text, cookies_path=None):
                     save_post("published", {"id": tweet_id or "tw_cookie", "text": text, "post_id": tweet_id})
                     return {"id": tweet_id, "text": text, "status": "published"}
                 else:
-                    print(f"HTTP {res.status_code} ({qid}): {res.text[:160]}", file=sys.stderr)
+                    print(f"HTTP {res.status_code} ({q}): {res.text[:160]}", file=sys.stderr)
         except Exception as e:
-            print(f"Request failed ({qid}): {e}", file=sys.stderr)
+            print(f"Request failed ({q}): {e}", file=sys.stderr)
 
     print("ERROR: Failed to publish tweet with cookies.", file=sys.stderr)
     sys.exit(1)
