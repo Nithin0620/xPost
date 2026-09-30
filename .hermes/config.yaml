@@ -1,6 +1,8 @@
 model:
-  default: gemini-2.5-flash
+  default: gemini-3.1-flash-lite
   provider: gemini
+  api_key: "${GEMINI_API_KEY}"
+  context_length: 131072
 database:
   journal_mode: wal
 runtime:
@@ -12,6 +14,9 @@ agent:
   verbose: false
   reasoning_effort: none
   personalities: {}
+skills:
+  creation_nudge_interval: 15
+  disable_skills_prompt: true
 terminal:
   backend: local
   cwd: .
@@ -92,8 +97,6 @@ memory:
   nudge_interval: 10
 delegation:
   max_iterations: 250
-skills:
-  creation_nudge_interval: 15
 kanban:
   review_dispatch: true
 code_execution:
@@ -242,3 +245,5 @@ platforms:
       chat_id: '7855336071'
       name: Nithin
       user_id: '7855336071'
+approvals:
+  destructive_slash_confirm: false
