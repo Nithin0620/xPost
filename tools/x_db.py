@@ -97,6 +97,17 @@ def list_posts(status=None, limit=20):
     return posts
 
 
+def replied_ids():
+    """Ids of tweets the owner already replied to through xPost (payload field `in_reply_to`)."""
+    if _uri():
+        return {d["in_reply_to"] for d in _collection("posts").find(
+            {"in_reply_to": {"$exists": True}}, {"in_reply_to": 1})}
+    if not POSTS_FILE.exists():
+        return set()
+    rows = [json.loads(l) for l in POSTS_FILE.read_text().splitlines()]
+    return {r["in_reply_to"] for r in rows if r.get("in_reply_to")}
+
+
 def save_edit(original, final, note=""):
     """Store an (agent draft -> owner-approved text) pair; these teach the agent the owner's voice."""
     if original.strip() == final.strip():

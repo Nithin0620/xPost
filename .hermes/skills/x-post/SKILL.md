@@ -1,7 +1,7 @@
 ---
 name: x-post
 description: "Post to X/Twitter as the owner, cheaply and safely. Drafts tweets with a HUMAN APPROVAL GATE on Telegram: never publishes without the owner's review and approval."
-version: 1.3.0
+version: 1.4.0
 author: nithin
 license: MIT
 platforms: [linux]
@@ -93,6 +93,16 @@ material. If no answer arrives within the window, fall back to Phase 1 sources.
    .venv/bin/python tools/x_db.py save-post \
      --status draft --payload '{"id":"<tweet id or short slug>","text":"<draft text>","why":"<rationale>"}'
    ```
+
+### Timing — post like a person, not a cron job
+After deciding today's volume, pick the times with jitter instead of fixed slots:
+```bash
+.venv/bin/python tools/x_schedule.py plan --posts <2-4>
+```
+It returns random local times inside the owner's active windows (≥90 min apart)
+and occasionally `"skip": true` — on a skip day, post nothing unless the owner
+explicitly asks. Schedule each approved tweet for its time (Hermes cronjob)
+instead of publishing everything the moment it's approved.
 
 ### Phase 2 — Send for review (Telegram)
 Send to the owner in Telegram:
