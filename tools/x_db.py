@@ -80,21 +80,33 @@ def save_post(status, payload):
         _append_local(POSTS_FILE, doc)
 
 
-def list_posts(status=None, limit=20):
-    posts = []
+def fetch_posts(status=None, limit=20):
+    """Posts newest first (limit=None for all)."""
     if _uri():
-        col = _collection("posts")
-        query = {"status": status} if status else {}
-        cursor = col.find(query).sort("updated_at", -1).limit(limit)
-        posts = list(cursor)
-    else:
-        if POSTS_FILE.exists():
-            posts = [json.loads(l) for l in POSTS_FILE.read_text().splitlines()]
-            if status:
-                posts = [p for p in posts if p.get("status") == status]
-            posts = posts[-limit:][::-1]
-    print(json.dumps(posts, indent=2))
+        cursor = _collection("posts").find({"status": status} if status else {}).sort("updated_at", -1)
+        return list(cursor.limit(limit) if limit else cursor)
+    if not POSTS_FILE.exists():
+        return []
+    posts = [json.loads(l) for l in POSTS_FILE.read_text().splitlines() if l.strip()]
+    if status:
+        posts = [p for p in posts if p.get("status") == status]
+    return posts[::-1][:limit] if limit else posts[::-1]
+
+
+def list_posts(status=None, limit=20):
+    posts = fetch_posts(status, limit)
+    print(json.dumps(posts, indent=2, default=str))
     return posts
+
+
+def fetch_engagement():
+    """Scraped own-profile rows: Mongo `engagement` if configured, else data/engagement.jsonl."""
+    if _uri():
+        return list(_collection("engagement").find())
+    path = DATA / "engagement.jsonl"
+    if not path.exists():
+        return []
+    return [json.loads(l) for l in path.read_text().splitlines() if l.strip()]
 
 
 def replied_ids():
@@ -122,14 +134,19 @@ def save_edit(original, final, note=""):
         _append_local(EDITS_FILE, doc)
 
 
-def list_edits(limit=20):
+def fetch_edits(limit=20):
     if _uri():
-        edits = list(_collection("edits").find().sort("created_at", -1).limit(limit))
-    else:
-        edits = []
-        if EDITS_FILE.exists():
-            edits = [json.loads(l) for l in EDITS_FILE.read_text().splitlines()][-limit:][::-1]
-    print(json.dumps(edits, indent=2))
+        cursor = _collection("edits").find().sort("created_at", -1)
+        return list(cursor.limit(limit) if limit else cursor)
+    if not EDITS_FILE.exists():
+        return []
+    edits = [json.loads(l) for l in EDITS_FILE.read_text().splitlines() if l.strip()][::-1]
+    return edits[:limit] if limit else edits
+
+
+def list_edits(limit=20):
+    edits = fetch_edits(limit)
+    print(json.dumps(edits, indent=2, default=str))
     return edits
 
 
