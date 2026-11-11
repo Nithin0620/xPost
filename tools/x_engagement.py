@@ -217,14 +217,15 @@ def summarize(rows):
         print(f"{key}: " + " | ".join(f"{v} {avg:.2%} (n={n})" for v, avg, n in vals))
 
 
-def pending_replies(handle, max_age_days=3):
+def find_pending_replies(handle, max_age_days=3, rows=None, done=None):
     """Replies on the owner's recent posts that the owner hasn't answered via xPost yet."""
     from datetime import datetime, timedelta, timezone
-    from x_db import replied_ids
-    done = replied_ids()
+    if done is None:
+        from x_db import replied_ids
+        done = replied_ids()
     cutoff = datetime.now(timezone.utc) - timedelta(days=max_age_days)
     out = []
-    for r in load_rows():
+    for r in load_rows() if rows is None else rows:
         try:
             when = datetime.fromisoformat(str(r["date"]).replace(" ", "T"))
         except ValueError:
@@ -237,6 +238,11 @@ def pending_replies(handle, max_age_days=3):
             if rep.get("id") and rep["id"] not in done and \
                     rep.get("author", "").lower() != handle.lower():
                 out.append({"post_id": r["id"], "post_text": r["text"], **rep})
+    return out
+
+
+def pending_replies(handle, max_age_days=3):
+    out = find_pending_replies(handle, max_age_days)
     print(json.dumps(out, indent=2))
     return out
 

@@ -1,3 +1,5 @@
 openai>=1.0
 twscrape>=0.17
 pymongo>=4.0
+streamlit>=1.50
+pandas>=2.0

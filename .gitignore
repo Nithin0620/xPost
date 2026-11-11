@@ -7,3 +7,4 @@ data/
 *.log
 auth/
 
+.streamlit/secrets.toml

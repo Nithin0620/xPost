@@ -25,6 +25,7 @@ as the model.
 | `tools/x_style.py` | Flags AI-sounding drafts (em dashes, "it's not just X", buzzwords…). |
 | `tools/x_schedule.py` | Picks jittered, human-looking posting times. |
 | `tools/x_db.py` | Stores drafts, published posts and engagement snapshots in MongoDB (falls back to `data/*.jsonl`). |
+| `dashboard/app.py` | Read-only Streamlit dashboard: posts, drafts, engagement, pending replies, voice edits. |
 | `agent.py` | Standalone one-shot poster (no approval gate) — Gemini draft → `xurl post`. Use `--dry-run` to preview. |
 
 **Posting only ever goes through `xurl`** (official X API v2). Plain-text posts
@@ -57,6 +58,22 @@ cp .env.example .env        # fill in GEMINI_API_KEY, Telegram, X client id/secr
 .venv/bin/python agent.py --selfcheck
 .venv/bin/pip install pytest && .venv/bin/pytest -q                         # unit tests (also run in CI)
 ```
+
+## Dashboard
+
+```bash
+.venv/bin/streamlit run dashboard/app.py      # http://localhost:8501
+```
+
+A read-only view of everything the agent stores: drafts and published posts (with
+style-check results), engagement rate over time and by format, length and hour,
+unanswered replies, and your edits to drafts. It reads MongoDB when `MONGODB_URI`
+is set, otherwise `data/*.jsonl`. Approving and posting still happen only in
+Telegram and through `xurl`.
+
+To host it, deploy `dashboard/app.py` on [Streamlit Community Cloud](https://streamlit.io/cloud)
+and add `MONGODB_URI` and `X_HANDLE` under the app's secrets. Set the app to private,
+because the dashboard has no login of its own.
 
 ## Scheduling
 
