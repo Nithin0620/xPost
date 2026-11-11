@@ -19,7 +19,11 @@ as the model.
 |---|---|
 | `.hermes/skills/x-post/SKILL.md` | Daily drafting + **mandatory Telegram approval gate** + posting rules (no links, ≤260 chars, no repeats, 0–2 hashtags). |
 | `.hermes/skills/x-engagement/SKILL.md` | Scrapes your own profile's metrics/replies and writes "what works / what doesn't" to memory. |
-| `tools/x_engagement.py` | Read-only own-profile scraper (twscrape). |
+| `.hermes/skills/x-reply/SKILL.md` | Drafts replies to people who replied to your posts; same approval gate. |
+| `.hermes/skills/x-post/VOICE.md` + `examples.md` | Your voice guide and real example tweets (fill `examples.md` in!). |
+| `tools/x_engagement.py` | Read-only own-profile scraper (twscrape) + engagement-rate analysis. |
+| `tools/x_style.py` | Flags AI-sounding drafts (em dashes, "it's not just X", buzzwords…). |
+| `tools/x_schedule.py` | Picks jittered, human-looking posting times. |
 | `tools/x_db.py` | Stores drafts, published posts and engagement snapshots in MongoDB (falls back to `data/*.jsonl`). |
 | `agent.py` | Standalone one-shot poster (no approval gate) — Gemini draft → `xurl post`. Use `--dry-run` to preview. |
 
@@ -51,7 +55,16 @@ cp .env.example .env        # fill in GEMINI_API_KEY, Telegram, X client id/secr
 .venv/bin/python tools/x_db.py list-posts --status published --limit 10      # post history
 .venv/bin/python agent.py --dry-run                                          # preview a Gemini draft
 .venv/bin/python agent.py --selfcheck
+.venv/bin/pip install pytest && .venv/bin/pytest -q                         # unit tests (also run in CI)
 ```
+
+## Scheduling
+
+- **Hermes (recommended):** message the bot on Telegram, e.g. *"every day at 8:00
+  start the x-post workflow"*. Hermes creates the job with its `cronjob` tool;
+  the skill then picks jittered posting times with `tools/x_schedule.py` and
+  still waits for your approval before anything is posted.
+- **Standalone / scraping:** see `deploy/crontab.example`.
 
 ## Security
 
