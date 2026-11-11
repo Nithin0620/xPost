@@ -13,6 +13,8 @@ Auth (pick one — browser-session cookies work even when Cloudflare blocks logi
 
 Usage:
   x_engagement.py --fetch --handle <handle> [--limit 20]    # scrape + summarize
+  x_engagement.py --analyze                                 # re-summarize stored data, no scraping
+  x_engagement.py --pending-replies --handle <handle>       # unanswered replies on recent posts
   x_engagement.py --selfcheck
 """
 import argparse
@@ -96,63 +98,147 @@ def fetch(handle, limit):
         tweets = await twscrape.gather(api.user_tweets(user.id, limit=limit))
         rows = []
         for t in tweets:
-            replies = await twscrape.gather(api.tweet_replies(t.id, limit=5))
+            replies = await twscrape.gather(api.tweet_replies(t.id, limit=10))
             inner = t.retweetedTweet or t  # RT wrapper carries zeroed metrics; use original
             rows.append({
                 "id": str(t.id),
-                "date": str(t.date),
+                "date": t.date.isoformat(),
                 "text": t.rawContent,
+                "is_retweet": t.retweetedTweet is not None,
+                "has_media": bool(getattr(inner, "media", None) and
+                                  (inner.media.photos or inner.media.videos or inner.media.animated)),
                 "metrics": {
                     "like_count": inner.likeCount,
                     "retweet_count": inner.retweetCount,
                     "reply_count": inner.replyCount,
                     "quote_count": inner.quoteCount,
+                    "bookmark_count": getattr(inner, "bookmarkedCount", 0) or 0,
                 },
                 "views": t.viewCount,
                 "sample_replies": [
                     {
+                        "id": str(r.id),
+                        "author": r.user.username,
                         "full_text": r.rawContent,
                         "public_metrics": {"like_count": r.likeCount, "reply_count": r.replyCount},
                     }
-                    for r in replies[:5]
+                    for r in replies
+                    if r.user.username.lower() != handle.lower()
                 ],
             })
-        existing = set()
-        if ENGAGEMENT_FILE.exists():
-            existing = {json.loads(l)["id"] for l in ENGAGEMENT_FILE.read_text().splitlines()}
-        new_rows = [r for r in rows if r["id"] not in existing]  # dedup across pagination retries
-        DATA.mkdir(exist_ok=True)
-        with ENGAGEMENT_FILE.open("a") as f:
-            for r in new_rows:
-                f.write(json.dumps(r) + "\n")
-        print(f"appended {len(new_rows)} new rows ({len(rows) - len(new_rows)} dupes skipped)")
+        _upsert_local(rows)
+        print(f"stored {len(rows)} posts (metrics refreshed for already-seen posts)")
         from x_db import save_engagement
-        save_engagement(new_rows)
+        save_engagement(rows)
         summarize(rows)
     asyncio.run(run())
 
 
+def load_rows():
+    if not ENGAGEMENT_FILE.exists():
+        return []
+    return [json.loads(l) for l in ENGAGEMENT_FILE.read_text().splitlines() if l.strip()]
+
+
+def _upsert_local(rows):
+    """Replace rows by id so later fetches refresh metrics instead of freezing day-0 numbers."""
+    merged = {r["id"]: r for r in load_rows()}
+    merged.update({r["id"]: r for r in rows})
+    DATA.mkdir(exist_ok=True)
+    ENGAGEMENT_FILE.write_text("".join(json.dumps(r) + "\n" for r in merged.values()))
+
+
+def score(r):
+    """Weighted interactions per view. Replies/quotes signal conversation, so weigh them most."""
+    m = r["metrics"]
+    interactions = (m.get("like_count", 0) + 2 * m.get("retweet_count", 0)
+                    + 3 * m.get("reply_count", 0) + 3 * m.get("quote_count", 0)
+                    + m.get("bookmark_count", 0))
+    views = r.get("views") or 0
+    return interactions / views if views else 0.0
+
+
+def features(r):
+    text = r["text"]
+    n = len(text)
+    try:
+        from datetime import datetime
+        hour = datetime.fromisoformat(str(r["date"]).replace(" ", "T")).hour
+    except ValueError:
+        hour = None
+    if r.get("has_media"):
+        fmt = "media"
+    elif text.rstrip().endswith("?"):
+        fmt = "question"
+    elif any(ch.isdigit() for ch in text):
+        fmt = "has-number"
+    else:
+        fmt = "statement"
+    return {
+        "format": fmt,
+        "length": "short (<100)" if n < 100 else "medium (100-200)" if n <= 200 else "long (>200)",
+        "hour_utc": f"{hour // 3 * 3:02d}-{hour // 3 * 3 + 3:02d}h" if hour is not None else "unknown",
+    }
+
+
+def breakdown(rows):
+    """Average engagement rate per feature value: {feature: [(value, avg_rate, n), ...]}."""
+    out = {}
+    for key in ("format", "length", "hour_utc"):
+        buckets = {}
+        for r in rows:
+            buckets.setdefault(features(r)[key], []).append(score(r))
+        out[key] = sorted(((v, sum(s) / len(s), len(s)) for v, s in buckets.items()),
+                          key=lambda x: x[1], reverse=True)
+    return out
+
+
 def summarize(rows):
-    def score(r):
-        m = r["metrics"]
-        return m.get("like_count", 0) + 3 * m.get("retweet_count", 0) + m.get("reply_count", 0)
+    rows = [r for r in rows if not r.get("is_retweet") and r.get("views")]
     if not rows:
-        print("no posts found")
+        print("no original posts with view counts found")
         return
     ranked = sorted(rows, key=score, reverse=True)
-    print(f"scraped {len(rows)} posts; appended to {ENGAGEMENT_FILE}")
+
+    def line(r):
+        m = r["metrics"]
+        return (f"- [rate {score(r):.2%}] views={r['views']} likes={m.get('like_count', 0)} "
+                f"rt={m.get('retweet_count', 0)} replies={m.get('reply_count', 0)} "
+                f"quotes={m.get('quote_count', 0)} :: {r['text'][:120]}")
+    print(f"analyzed {len(rows)} original posts (engagement rate = weighted interactions / views)")
     print("\n=== TOP POSTS ===")
     for r in ranked[:3]:
-        m = r["metrics"]
-        print(f"- [{score(r)}] views={r['views']} likes={m.get('like_count',0)} "
-              f"rt={m.get('retweet_count',0)} replies={m.get('reply_count',0)} :: "
-              f"{r['text'][:120]}")
+        print(line(r))
     print("\n=== BOTTOM POSTS ===")
-    for r in ranked[-3:]:
-        m = r["metrics"]
-        print(f"- [{score(r)}] views={r['views']} likes={m.get('like_count',0)} "
-              f"rt={m.get('retweet_count',0)} replies={m.get('reply_count',0)} :: "
-              f"{r['text'][:120]}")
+    for r in ranked[3:][-3:]:
+        print(line(r))
+    print("\n=== WHAT WORKS (avg rate by feature, n = posts) ===")
+    for key, vals in breakdown(rows).items():
+        print(f"{key}: " + " | ".join(f"{v} {avg:.2%} (n={n})" for v, avg, n in vals))
+
+
+def pending_replies(handle, max_age_days=3):
+    """Replies on the owner's recent posts that the owner hasn't answered via xPost yet."""
+    from datetime import datetime, timedelta, timezone
+    from x_db import replied_ids
+    done = replied_ids()
+    cutoff = datetime.now(timezone.utc) - timedelta(days=max_age_days)
+    out = []
+    for r in load_rows():
+        try:
+            when = datetime.fromisoformat(str(r["date"]).replace(" ", "T"))
+        except ValueError:
+            continue
+        if when.tzinfo is None:
+            when = when.replace(tzinfo=timezone.utc)
+        if r.get("is_retweet") or when < cutoff:
+            continue
+        for rep in r.get("sample_replies", []):
+            if rep.get("id") and rep["id"] not in done and \
+                    rep.get("author", "").lower() != handle.lower():
+                out.append({"post_id": r["id"], "post_text": r["text"], **rep})
+    print(json.dumps(out, indent=2))
+    return out
 
 
 def selfcheck():
@@ -172,6 +258,9 @@ if __name__ == "__main__":
     ap.add_argument("--fetch", action="store_true")
     ap.add_argument("--handle", default="")
     ap.add_argument("--limit", type=int, default=20)
+    ap.add_argument("--analyze", action="store_true")
+    ap.add_argument("--pending-replies", action="store_true")
+    ap.add_argument("--max-age-days", type=int, default=3)
     ap.add_argument("--selfcheck", action="store_true")
     a = ap.parse_args()
     if a.selfcheck:
@@ -182,5 +271,9 @@ if __name__ == "__main__":
         login(a.login[0], a.login[1], a.email, a.email_pass)
     elif a.fetch:
         fetch(a.handle, a.limit)
+    elif a.analyze:
+        summarize(load_rows())
+    elif a.pending_replies:
+        pending_replies(a.handle, a.max_age_days)
     else:
         ap.print_help(); sys.exit(0)
