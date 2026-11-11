@@ -1,7 +1,7 @@
 ---
 name: x-post
 description: "Post to X/Twitter as the owner, cheaply and safely. Drafts tweets with a HUMAN APPROVAL GATE on Telegram: never publishes without the owner's review and approval."
-version: 1.2.0
+version: 1.4.0
 author: nithin
 license: MIT
 platforms: [linux]
@@ -31,13 +31,15 @@ the exact tweet text in Telegram.**
 
 1. **Never post links/URLs.** A tweet containing a URL costs $0.20 on X
    (plain text costs $0.015). Mention repos/products by name, never by URL.
-2. **Max 260 characters.** X allows 280; leave headroom for safety.
-3. **No repeats.** Search memory and past engagement data first. Never post a
+2. **Sound like the owner, not an AI.** Follow `VOICE.md`; every draft must
+   pass `tools/x_style.py check`.
+3. **Max 260 characters.** X allows 280; leave headroom for safety.
+4. **No repeats.** Search memory and past engagement data first. Never post a
    tweet whose idea/topic was already posted in the last 14 days.
-4. **Quality over volume.** User wants 2 posts on lean days, 3-4 on strong
+5. **Quality over volume.** User wants 2 posts on lean days, 3-4 on strong
    trending days. Never post filler just to hit a number.
-5. **No hashtag spam.** 0-2 hashtags max.
-6. **Volume decision:** use the day's trending/news research. If a real trend
+6. **No hashtag spam.** 0-2 hashtags max.
+7. **Volume decision:** use the day's trending/news research. If a real trend
    fits the account's voice -> post 3-4; otherwise keep it at 2.
 
 ## Standing instructions ("senior enhancer")
@@ -58,9 +60,16 @@ These become STANDING RULES:
 
 ## Workflow
 
+### Phase 0 — Ask what actually happened
+At the start of the daily window, send the owner ONE short Telegram question:
+"what did you work on / run into today?" Use the answer as the primary draft
+material. If no answer arrives within the window, fall back to Phase 1 sources.
+
 ### Phase 1 — Gather and draft
-1. Check persistent memory for: standing instructions, review style feedback,
-   voice, posted history.
+1. Read `VOICE.md` and `examples.md` (in this skill's directory), and the
+   owner's recent rewrites: `.venv/bin/python tools/x_db.py list-edits --limit 15`.
+   Then check persistent memory for: standing instructions, review style
+   feedback, posted history.
 2. If a standing instruction names a repo ("talk about my repo X"), fetch its
    current description + recent commits so the draft is accurate:
    ```bash
@@ -71,13 +80,29 @@ These become STANDING RULES:
 3. Run engagement scrape (`tools/x_engagement.py --fetch`), read top/bottom
    posts to apply what worked.
 4. Research today's trends/news (web search).
-5. Draft 1-2 candidate tweets. For each, include WHY you chose it (trend
-   signal, requested topic/repo, or past-performance pattern).
-6. Store every draft immediately (pre-approval) so history lives in the DB:
+5. Draft 1-2 candidate tweets in the owner's voice, using different formats
+   from the last few posts (see VOICE.md). For each, include WHY you chose it
+   (owner's answer, trend signal, requested topic/repo, or past-performance pattern).
+6. Lint every draft and rewrite until it passes (max 3 tries):
+   ```bash
+   .venv/bin/python tools/x_style.py check "<draft text>"
+   ```
+   Exit code 1 / `REWRITE` means it sounds AI-written: fix the listed issues.
+7. Store every draft immediately (pre-approval) so history lives in the DB:
    ```bash
    .venv/bin/python tools/x_db.py save-post \
      --status draft --payload '{"id":"<tweet id or short slug>","text":"<draft text>","why":"<rationale>"}'
    ```
+
+### Timing — post like a person, not a cron job
+After deciding today's volume, pick the times with jitter instead of fixed slots:
+```bash
+.venv/bin/python tools/x_schedule.py plan --posts <2-4>
+```
+It returns random local times inside the owner's active windows (≥90 min apart)
+and occasionally `"skip": true` — on a skip day, post nothing unless the owner
+explicitly asks. Schedule each approved tweet for its time (Hermes cronjob)
+instead of publishing everything the moment it's approved.
 
 ### Phase 2 — Send for review (Telegram)
 Send to the owner in Telegram:
@@ -99,7 +124,13 @@ the owner answers.
 On the owner's reply:
 - **Approve (all / one)**: only the explicitly approved tweet(s) proceed.
 - **Feedback**: revise exactly per the feedback; resend revised drafts for a
-  new approval. You may iterate up to 3 times; after that, ask if they want a
+  new approval.
+- **Owner rewrites the text themselves** (or the approved text differs from
+  your first draft): record the pair so future drafts learn the voice:
+  ```bash
+  .venv/bin/python tools/x_db.py save-edit --original "<your first draft>" \
+    --final "<approved text>" --note "<owner feedback, if any>"
+  ``` You may iterate up to 3 times; after that, ask if they want a
   fresh angle instead of endlessly rewording.
 - **Kill / hold**: drop that tweet, do not post it.
 - **New instruction**: save it to memory as standing direction, re-draft,

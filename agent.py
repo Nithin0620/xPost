@@ -9,6 +9,11 @@ from pathlib import Path
 from openai import OpenAI
 
 ROOT = Path(__file__).parent
+sys.path.insert(0, str(ROOT / "tools"))
+from x_style import check as style_check  # noqa: E402
+
+VOICE_FILE = ROOT / ".hermes" / "skills" / "x-post" / "VOICE.md"
+EXAMPLES_FILE = ROOT / ".hermes" / "skills" / "x-post" / "examples.md"
 MEMORY_FILE = ROOT / "memory.json"
 MAX_LEN = 260
 GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
@@ -61,7 +66,14 @@ def build_prompt(mode, github, topics, past):
     }[mode]
     anti = "; ".join(past[-10:])
     suffix = f" Do NOT repeat the ideas of past tweets: {anti}." if anti else ""
-    return base + f" Max {MAX_LEN} chars, no links, no hashtag spam." + suffix
+    return voice_context() + base + f" Max {MAX_LEN} chars, no links, no hashtag spam." + suffix
+
+
+def voice_context():
+    parts = [f.read_text() for f in (VOICE_FILE, EXAMPLES_FILE) if f.exists()]
+    if not parts:
+        return ""
+    return "Write in this voice:\n" + "\n\n".join(parts) + "\n\nTask: "
 
 
 def generate(api_key, prompt, model=DEFAULT_MODEL):
@@ -78,7 +90,7 @@ def filter_tweet(text, mem):
     text = text.strip("\"'")
     if not text or len(text) > MAX_LEN or text in mem["posted"]:
         return None
-    if "http://" in text or "https://" in text:
+    if not style_check(text)["ok"]:
         return None
     return text
 
@@ -87,7 +99,6 @@ def post(text):
     res = subprocess.run(["xurl", "post", text], capture_output=True, text=True)
     if res.returncode != 0:
         raise RuntimeError(f"xurl post failed: {res.stderr.strip() or res.stdout.strip()}")
-    sys.path.insert(0, str(ROOT / "tools"))
     from x_db import save_post
     tweet_id = ""
     try:
@@ -131,6 +142,7 @@ def selfcheck():
     assert filter_tweet("hi", {"posted": ["hi"]}) is None
     assert "Do NOT repeat" in build_prompt("free", "", [], ["old tweet"])
     assert "Do NOT repeat" not in build_prompt("free", "", [], [])
+    assert filter_tweet("this isn't just a tool, it's a game-changer", {"posted": []}) is None
     print("selfcheck ok")
 
 

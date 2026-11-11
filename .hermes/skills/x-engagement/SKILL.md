@@ -38,16 +38,28 @@ for this — that is metered.
 .venv/bin/python tools/x_engagement.py --fetch --handle USERNAME --limit 20
 ```
 
-The script prints the top 3 and bottom 3 posts by engagement score along with
-sample replies. Read that output.
+The script ranks posts by **engagement rate** (likes + 2×RTs + 3×replies +
+3×quotes + bookmarks, divided by views), prints the top 3 / bottom 3, and a
+"what works" table: average rate by format (question / media / has-number /
+statement), length bucket, and 3-hour UTC posting window. Read that output.
+Re-fetching refreshes metrics for posts already seen, so run it again a day
+later to judge a post fairly.
+
+```bash
+# re-run the analysis over all stored posts without scraping:
+.venv/bin/python tools/x_engagement.py --analyze
+```
+
+Replies people left on the owner's posts feed the `x-reply` skill.
 
 ## Analysis job (the actual learning)
 
 After every fetch, reason over the data and then WRITE the findings to
 persistent memory so future posts improve:
 
-1. **Pattern mining:** compare top vs bottom posts. What differed? Topic area,
-   question vs statement, length, emoji/hashtag use, time of day, hook style.
+1. **Pattern mining:** start from the "what works" table, then compare top vs
+   bottom posts for what it can't see: topic, hook style, voice. Treat buckets
+   with n < 3 as noise, not a rule.
 2. **Replies:** what did commenters ask or react to? Complaints, praise, or
    interests worth following up on.
 3. **Trend of engagement:** is the account's engagement rising or falling vs
