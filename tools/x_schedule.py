@@ -16,8 +16,10 @@ DEFAULT_WINDOWS = "08:30-10:30,13:00-14:00,19:00-23:00"
 
 
 def _minutes(hhmm):
-    h, m = hhmm.split(":")
-    return int(h) * 60 + int(m)
+    h, m = (int(x) for x in hhmm.split(":"))
+    if not (0 <= h <= 23 and 0 <= m <= 59):
+        raise ValueError(f"{hhmm!r} is not a valid HH:MM time")
+    return h * 60 + m
 
 
 def parse_windows(spec):
@@ -33,9 +35,10 @@ def parse_windows(spec):
 
 def plan(posts, windows=DEFAULT_WINDOWS, min_gap=90, skip_chance=0.1, rng=None):
     rng = rng or random.Random()
+    parsed = parse_windows(windows)
     if posts <= 0 or rng.random() < skip_chance:
         return {"skip": True, "times": []}
-    slots = [m for a, b in parse_windows(windows) for m in range(a, b)]
+    slots = [m for a, b in parsed for m in range(a, b)]
     for _ in range(200):
         picks = sorted(rng.sample(slots, min(posts, len(slots))))
         if all(b - a >= min_gap for a, b in zip(picks, picks[1:])):

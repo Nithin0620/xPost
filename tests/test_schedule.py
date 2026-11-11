@@ -29,3 +29,9 @@ def test_skip_and_narrow_window():
 def test_bad_window():
     with pytest.raises(ValueError):
         parse_windows("10:00-09:00")
+
+
+@pytest.mark.parametrize("bad", ["25:00-27:00", "09:60-10:00", "10:00-09:00", "nine-ten"])
+def test_invalid_windows_rejected_even_on_skip_days(bad):
+    with pytest.raises(ValueError):
+        plan(1, bad, skip_chance=1.0)
