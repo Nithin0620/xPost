@@ -1,16 +1,18 @@
 #!/usr/bin/env python3
 import json
 import random
+import subprocess
 import sys
 import urllib.request
 from pathlib import Path
 
-import tweepy
 from openai import OpenAI
 
 ROOT = Path(__file__).parent
 MEMORY_FILE = ROOT / "memory.json"
-MAX_LEN = 280
+MAX_LEN = 260
+GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
+DEFAULT_MODEL = "gemini-3.1-flash-lite"
 
 
 def load_env():
@@ -59,13 +61,13 @@ def build_prompt(mode, github, topics, past):
     }[mode]
     anti = "; ".join(past[-10:])
     suffix = f" Do NOT repeat the ideas of past tweets: {anti}." if anti else ""
-    return base + " Max 280 chars, no hashtag spam." + suffix
+    return base + f" Max {MAX_LEN} chars, no links, no hashtag spam." + suffix
 
 
-def generate(api_key, prompt):
-    client = OpenAI(api_key=api_key)
+def generate(api_key, prompt, model=DEFAULT_MODEL):
+    client = OpenAI(api_key=api_key, base_url=GEMINI_BASE_URL)
     res = client.chat.completions.create(
-        model="gpt-4o-mini",
+        model=model,
         messages=[{"role": "user", "content": prompt}],
         temperature=0.9,
     )
@@ -76,17 +78,23 @@ def filter_tweet(text, mem):
     text = text.strip("\"'")
     if not text or len(text) > MAX_LEN or text in mem["posted"]:
         return None
+    if "http://" in text or "https://" in text:
+        return None
     return text
 
 
-def post(env, text):
-    client = tweepy.Client(
-        consumer_key=env["X_API_KEY"],
-        consumer_secret=env["X_API_SECRET"],
-        access_token=env["X_ACCESS_TOKEN"],
-        access_token_secret=env["X_ACCESS_TOKEN_SECRET"],
-    )
-    client.create_tweet(text=text)
+def post(text):
+    res = subprocess.run(["xurl", "post", text], capture_output=True, text=True)
+    if res.returncode != 0:
+        raise RuntimeError(f"xurl post failed: {res.stderr.strip() or res.stdout.strip()}")
+    sys.path.insert(0, str(ROOT / "tools"))
+    from x_db import save_post
+    tweet_id = ""
+    try:
+        tweet_id = json.loads(res.stdout).get("data", {}).get("id", "")
+    except (json.JSONDecodeError, AttributeError):
+        pass
+    save_post("published", {"id": tweet_id or None, "text": text, "post_id": tweet_id})
 
 
 def main(argv):
@@ -97,27 +105,29 @@ def main(argv):
     prompt = build_prompt(mode, github, mem["topics"], mem["posted"])
     text = None
     for _ in range(3):
-        text = filter_tweet(generate(env["OPENAI_API_KEY"], prompt), mem)
+        text = filter_tweet(generate(env["GEMINI_API_KEY"], prompt,
+                                     env.get("GEMINI_MODEL") or DEFAULT_MODEL), mem)
         if text:
             break
     if not text:
         print("no acceptable tweet generated, skipping run")
         return 0
+    if "--dry-run" in argv:
+        print(f"[{mode}] {text}")
+        return 0
+    post(text)
     mem["posted"].append(text)
     if len(mem["posted"]) > 500:
         mem["posted"] = mem["posted"][-500:]
     save(mem)
-    if "--dry-run" in argv:
-        print(f"[{mode}] {text}")
-        return 0
-    post(env, text)
     print(f"posted ({mode}): {text}")
     return 0
 
 
 def selfcheck():
     assert filter_tweet("hi", {"posted": []}) == "hi"
-    assert filter_tweet("x" * 281, {"posted": []}) is None
+    assert filter_tweet("x" * (MAX_LEN + 1), {"posted": []}) is None
+    assert filter_tweet("see https://x.com", {"posted": []}) is None
     assert filter_tweet("hi", {"posted": ["hi"]}) is None
     assert "Do NOT repeat" in build_prompt("free", "", [], ["old tweet"])
     assert "Do NOT repeat" not in build_prompt("free", "", [], [])

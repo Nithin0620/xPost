@@ -1,7 +1,7 @@
 ---
 name: x-post
 description: "Post to X/Twitter as the owner, cheaply and safely. Drafts tweets with a HUMAN APPROVAL GATE on Telegram: never publishes without the owner's review and approval."
-version: 1.1.0
+version: 1.2.0
 author: nithin
 license: MIT
 platforms: [linux]
@@ -75,7 +75,7 @@ These become STANDING RULES:
    signal, requested topic/repo, or past-performance pattern).
 6. Store every draft immediately (pre-approval) so history lives in the DB:
    ```bash
-   cd /home/nithin/Projects/xPost && .venv/bin/python tools/x_db.py save-post \
+   .venv/bin/python tools/x_db.py save-post \
      --status draft --payload '{"id":"<tweet id or short slug>","text":"<draft text>","why":"<rationale>"}'
    ```
 
@@ -106,14 +106,17 @@ On the owner's reply:
   resend for approval.
 
 ### Phase 4 — Publish (only after explicit approval)
-Publish using the session cookie tool (100% free, no developer API credits needed):
+Publish with xurl (official X API v2). This is the ONLY posting path — never
+post via browser cookies, GraphQL endpoints, or any other tool:
 ```bash
-cd /home/nithin/Projects/xPost && .venv/bin/python tools/x_engagement.py --post "THE APPROVED TWEET TEXT"
+xurl post "THE APPROVED TWEET TEXT"
 ```
-*(Fallback if needed: `xurl post "THE APPROVED TWEET TEXT"`)*
-
 Confirm success; on 429/401 wait and retry once, then report.
-`x_engagement.py --post` automatically logs the published post into the DB.
+Then log the publish to the DB, using the tweet id from xurl's response:
+```bash
+.venv/bin/python tools/x_db.py save-post --status published \
+  --payload '{"id":"<tweet id>","text":"<tweet text>","post_id":"<tweet id>"}'
+```
 
 ### Phase 5 — Remember
 Save to persistent memory: what was posted today, why, any review feedback the
