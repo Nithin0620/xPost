@@ -30,11 +30,11 @@ for this — that is metered.
 
 ```bash
 # one-time setup (user runs interactively, outside agent):
-cd /home/nithin/Projects/xPost
+# from the xPost repo root
 .venv/bin/python tools/x_engagement.py --login USERNAME PASSWORD
 
 # daily fetch + summary:
-cd /home/nithin/Projects/xPost
+# from the xPost repo root
 .venv/bin/python tools/x_engagement.py --fetch --handle USERNAME --limit 20
 ```
 

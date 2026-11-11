@@ -4,4 +4,6 @@ __pycache__/
 agent.log
 accounts.db
 data/
-*.logauth/
+*.log
+auth/
+
