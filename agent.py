@@ -1,16 +1,23 @@
 #!/usr/bin/env python3
 import json
 import random
+import subprocess
 import sys
 import urllib.request
 from pathlib import Path
 
-import tweepy
 from openai import OpenAI
 
 ROOT = Path(__file__).parent
+sys.path.insert(0, str(ROOT / "tools"))
+from x_style import check as style_check  # noqa: E402
+
+VOICE_FILE = ROOT / ".hermes" / "skills" / "x-post" / "VOICE.md"
+EXAMPLES_FILE = ROOT / ".hermes" / "skills" / "x-post" / "examples.md"
 MEMORY_FILE = ROOT / "memory.json"
-MAX_LEN = 280
+MAX_LEN = 260
+GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
+DEFAULT_MODEL = "gemini-3.1-flash-lite"
 
 
 def load_env():
@@ -59,24 +66,32 @@ def build_prompt(mode, github, topics, past):
     }[mode]
     anti = "; ".join(past[-10:])
     suffix = f" Do NOT repeat the ideas of past tweets: {anti}." if anti else ""
-    return base + " Max 280 chars, no hashtag spam." + suffix
+    return voice_context() + base + f" Max {MAX_LEN} chars, no links, no hashtag spam." + suffix
 
 
-def generate(env, prompt):
-    gemini_key = env.get("GEMINI_API_KEY")
-    openai_key = env.get("OPENAI_API_KEY")
+def voice_context():
+    parts = [f.read_text() for f in (VOICE_FILE, EXAMPLES_FILE) if f.exists()]
+    if not parts:
+        return ""
+    return "Write in this voice:\n" + "\n\n".join(parts) + "\n\nTask: "
 
-    if gemini_key:
-        client = OpenAI(
-            base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
-            api_key=gemini_key,
-        )
-        model = env.get("GEMINI_MODEL", "gemini-3.5-flash-lite")
-    elif openai_key:
-        client = OpenAI(api_key=openai_key)
-        model = env.get("OPENAI_MODEL", "gpt-4o-mini")
+
+def generate(api_key_or_env, prompt, model=None):
+    if isinstance(api_key_or_env, dict):
+        env = api_key_or_env
+        gemini_key = env.get("GEMINI_API_KEY")
+        openai_key = env.get("OPENAI_API_KEY")
+        if gemini_key:
+            client = OpenAI(base_url=GEMINI_BASE_URL, api_key=gemini_key)
+            model = model or env.get("GEMINI_MODEL") or DEFAULT_MODEL
+        elif openai_key:
+            client = OpenAI(api_key=openai_key)
+            model = model or env.get("OPENAI_MODEL", "gpt-4o-mini")
+        else:
+            raise ValueError("Neither GEMINI_API_KEY nor OPENAI_API_KEY is configured.")
     else:
-        raise ValueError("Neither GEMINI_API_KEY nor OPENAI_API_KEY is configured.")
+        client = OpenAI(api_key=api_key_or_env, base_url=GEMINI_BASE_URL)
+        model = model or DEFAULT_MODEL
 
     res = client.chat.completions.create(
         model=model,
@@ -90,17 +105,22 @@ def filter_tweet(text, mem):
     text = text.strip("\"'")
     if not text or len(text) > MAX_LEN or text in mem["posted"]:
         return None
+    if not style_check(text)["ok"]:
+        return None
     return text
 
 
-def post(env, text):
-    client = tweepy.Client(
-        consumer_key=env["X_API_KEY"],
-        consumer_secret=env["X_API_SECRET"],
-        access_token=env["X_ACCESS_TOKEN"],
-        access_token_secret=env["X_ACCESS_TOKEN_SECRET"],
-    )
-    client.create_tweet(text=text)
+def post(text):
+    res = subprocess.run(["xurl", "post", text], capture_output=True, text=True)
+    if res.returncode != 0:
+        raise RuntimeError(f"xurl post failed: {res.stderr.strip() or res.stdout.strip()}")
+    from x_db import save_post
+    tweet_id = ""
+    try:
+        tweet_id = json.loads(res.stdout).get("data", {}).get("id", "")
+    except (json.JSONDecodeError, AttributeError):
+        pass
+    save_post("published", {"id": tweet_id or None, "text": text, "post_id": tweet_id})
 
 
 def main(argv):
@@ -120,21 +140,23 @@ def main(argv):
     if "--dry-run" in argv:
         print(f"[{mode}] {text}")
         return 0
+    post(text)
     mem["posted"].append(text)
     if len(mem["posted"]) > 500:
         mem["posted"] = mem["posted"][-500:]
     save(mem)
-    post(env, text)
     print(f"posted ({mode}): {text}")
     return 0
 
 
 def selfcheck():
     assert filter_tweet("hi", {"posted": []}) == "hi"
-    assert filter_tweet("x" * 281, {"posted": []}) is None
+    assert filter_tweet("x" * (MAX_LEN + 1), {"posted": []}) is None
+    assert filter_tweet("see https://x.com", {"posted": []}) is None
     assert filter_tweet("hi", {"posted": ["hi"]}) is None
     assert "Do NOT repeat" in build_prompt("free", "", [], ["old tweet"])
     assert "Do NOT repeat" not in build_prompt("free", "", [], [])
+    assert filter_tweet("this isn't just a tool, it's a game-changer", {"posted": []}) is None
     print("selfcheck ok")
 
 

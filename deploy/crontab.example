@@ -1,0 +1,11 @@
+# Example crontab for the standalone agent.py (no approval gate) and the
+# engagement scrape. Install with: crontab -e  (adjust the path and handle).
+# The Hermes x-post skill schedules itself via its cronjob tool instead; see README.
+
+XPOST=/path/to/xPost
+
+# Refresh own-profile engagement twice a day
+15 8,22 * * * cd $XPOST && .venv/bin/python tools/x_engagement.py --fetch --handle your_handle --limit 20 >> agent.log 2>&1
+
+# Standalone poster: wake at 09:00 and sleep a random 0-90 min so posts don't land on the hour
+0 9 * * * cd $XPOST && sleep $((RANDOM \% 5400)) && .venv/bin/python agent.py >> agent.log 2>&1

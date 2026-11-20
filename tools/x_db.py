@@ -8,6 +8,8 @@ Usage:
   x_db.py save-post --status draft --payload '<json>'       # agent saves a draft
   x_db.py save-post --status published --payload '<json>'   # agent saves a publish
   x_db.py list-posts [--status draft|published] [--limit 20]
+  x_db.py save-edit --original '<agent draft>' --final '<owner-approved text>' [--note '<feedback>']
+  x_db.py list-edits [--limit 20]                            # owner rewrites = best voice examples
 """
 import argparse
 import json
@@ -19,6 +21,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 DATA = ROOT / "data"
 POSTS_FILE = DATA / "posts.jsonl"
+EDITS_FILE = DATA / "edits.jsonl"
 
 
 def _load_env():
@@ -77,21 +80,74 @@ def save_post(status, payload):
         _append_local(POSTS_FILE, doc)
 
 
-def list_posts(status=None, limit=20):
-    posts = []
+def fetch_posts(status=None, limit=20):
+    """Posts newest first (limit=None for all)."""
     if _uri():
-        col = _collection("posts")
-        query = {"status": status} if status else {}
-        cursor = col.find(query).sort("updated_at", -1).limit(limit)
-        posts = list(cursor)
-    else:
-        if POSTS_FILE.exists():
-            posts = [json.loads(l) for l in POSTS_FILE.read_text().splitlines()]
-            if status:
-                posts = [p for p in posts if p.get("status") == status]
-            posts = posts[-limit:][::-1]
-    print(json.dumps(posts, indent=2))
+        cursor = _collection("posts").find({"status": status} if status else {}).sort("updated_at", -1)
+        return list(cursor.limit(limit) if limit else cursor)
+    if not POSTS_FILE.exists():
+        return []
+    posts = [json.loads(l) for l in POSTS_FILE.read_text().splitlines() if l.strip()]
+    if status:
+        posts = [p for p in posts if p.get("status") == status]
+    return posts[::-1][:limit] if limit else posts[::-1]
+
+
+def list_posts(status=None, limit=20):
+    posts = fetch_posts(status, limit)
+    print(json.dumps(posts, indent=2, default=str))
     return posts
+
+
+def fetch_engagement():
+    """Scraped own-profile rows: Mongo `engagement` if configured, else data/engagement.jsonl."""
+    if _uri():
+        return list(_collection("engagement").find())
+    path = DATA / "engagement.jsonl"
+    if not path.exists():
+        return []
+    return [json.loads(l) for l in path.read_text().splitlines() if l.strip()]
+
+
+def replied_ids():
+    """Ids of tweets the owner already replied to through xPost (payload field `in_reply_to`)."""
+    if _uri():
+        return {d["in_reply_to"] for d in _collection("posts").find(
+            {"in_reply_to": {"$exists": True}}, {"in_reply_to": 1})}
+    if not POSTS_FILE.exists():
+        return set()
+    rows = [json.loads(l) for l in POSTS_FILE.read_text().splitlines()]
+    return {r["in_reply_to"] for r in rows if r.get("in_reply_to")}
+
+
+def save_edit(original, final, note=""):
+    """Store an (agent draft -> owner-approved text) pair; these teach the agent the owner's voice."""
+    if original.strip() == final.strip():
+        print("draft unchanged; nothing to learn")
+        return
+    doc = {"_id": f"e{time.time_ns()}", "original": original, "final": final,
+           "note": note, "created_at": _now()}
+    if _uri():
+        _collection("edits").insert_one(doc)
+        print(f"edit {doc['_id']} saved -> mongo")
+    else:
+        _append_local(EDITS_FILE, doc)
+
+
+def fetch_edits(limit=20):
+    if _uri():
+        cursor = _collection("edits").find().sort("created_at", -1)
+        return list(cursor.limit(limit) if limit else cursor)
+    if not EDITS_FILE.exists():
+        return []
+    edits = [json.loads(l) for l in EDITS_FILE.read_text().splitlines() if l.strip()][::-1]
+    return edits[:limit] if limit else edits
+
+
+def list_edits(limit=20):
+    edits = fetch_edits(limit)
+    print(json.dumps(edits, indent=2, default=str))
+    return edits
 
 
 def _now():
@@ -112,6 +168,14 @@ def parse_args():
     p_list = subparsers.add_parser("list-posts", help="List recent posts")
     p_list.add_argument("--status", choices=["draft", "published"], default=None)
     p_list.add_argument("--limit", type=int, default=20)
+
+    p_edit = subparsers.add_parser("save-edit", help="Store an owner rewrite of a draft")
+    p_edit.add_argument("--original", required=True)
+    p_edit.add_argument("--final", required=True)
+    p_edit.add_argument("--note", default="")
+
+    p_ledits = subparsers.add_parser("list-edits", help="List recent owner rewrites")
+    p_ledits.add_argument("--limit", type=int, default=20)
 
     # Legacy flags on root parser
     ap.add_argument("--save-post", action="store_true")
@@ -134,6 +198,10 @@ if __name__ == "__main__":
         save_post(status, payload)
     elif args.subcommand == "list-posts" or args.list_posts:
         list_posts(status=args.status, limit=args.limit)
+    elif args.subcommand == "save-edit":
+        save_edit(args.original, args.final, args.note)
+    elif args.subcommand == "list-edits":
+        list_edits(limit=args.limit)
     else:
-        print("Usage: x_db.py [save-post|list-posts] [options]")
+        print("Usage: x_db.py [save-post|list-posts|save-edit|list-edits] [options]")
         sys.exit(0)
