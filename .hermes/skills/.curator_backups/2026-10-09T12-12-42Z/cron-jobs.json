@@ -1,0 +1,56 @@
+{
+  "jobs": [
+    {
+      "id": "f19cff746e0c",
+      "name": "Run agent.py --dry-run to generate a tweet draft,",
+      "prompt": "Run agent.py --dry-run to generate a tweet draft, then send me the draft on Telegram and ask me to approve or reject it before posting.",
+      "skills": [],
+      "skill": null,
+      "model": null,
+      "provider": null,
+      "provider_snapshot": "gemini",
+      "model_snapshot": "gemini-3.1-flash-lite",
+      "base_url": null,
+      "script": null,
+      "no_agent": false,
+      "monitor_script": null,
+      "monitor_url": null,
+      "monitor_state": null,
+      "context_from": null,
+      "schedule": {
+        "kind": "interval",
+        "minutes": 240,
+        "display": "every 240m"
+      },
+      "schedule_display": "every 240m",
+      "repeat": {
+        "times": null,
+        "completed": 43
+      },
+      "enabled": true,
+      "state": "scheduled",
+      "paused_at": null,
+      "paused_reason": null,
+      "created_at": "2026-09-30T10:25:37.647425+05:30",
+      "next_run_at": "2026-10-09T20:44:31.856390+05:30",
+      "last_run_at": "2026-10-09T16:44:31.856390+05:30",
+      "last_status": "error",
+      "last_error": "RuntimeError: Gemini HTTP 429 (RESOURCE_EXHAUSTED): Resource has been exhausted (e.g. check quota).",
+      "last_delivery_error": null,
+      "last_delivery_unverified": null,
+      "failure_streak": 4,
+      "deliver": "local",
+      "origin": null,
+      "enabled_toolsets": null,
+      "workdir": null,
+      "last_dispatch": {
+        "scheduled_at": "2026-10-09T16:43:41.766258+05:30",
+        "dispatched_at": "2026-10-09T16:44:19.008212+05:30",
+        "lateness_seconds": 37.2,
+        "kind": "on_time"
+      },
+      "fire_claim": null
+    }
+  ],
+  "updated_at": "2026-10-09T16:44:31.856588+05:30"
+}

@@ -1,0 +1,9 @@
+Python 3.13 is here! 🐍
+
+Major updates for devs:
+- Free-threaded CPython (experimental, no GIL!)
+- New, interactive REPL
+- Experimental JIT compiler
+- Better error messages
+
+Big steps forward for performance and dev experience. #Python #DevLife #botPost

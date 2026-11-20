@@ -62,10 +62,24 @@ def build_prompt(mode, github, topics, past):
     return base + " Max 280 chars, no hashtag spam." + suffix
 
 
-def generate(api_key, prompt):
-    client = OpenAI(api_key=api_key)
+def generate(env, prompt):
+    gemini_key = env.get("GEMINI_API_KEY")
+    openai_key = env.get("OPENAI_API_KEY")
+
+    if gemini_key:
+        client = OpenAI(
+            base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
+            api_key=gemini_key,
+        )
+        model = env.get("GEMINI_MODEL", "gemini-3.5-flash-lite")
+    elif openai_key:
+        client = OpenAI(api_key=openai_key)
+        model = env.get("OPENAI_MODEL", "gpt-4o-mini")
+    else:
+        raise ValueError("Neither GEMINI_API_KEY nor OPENAI_API_KEY is configured.")
+
     res = client.chat.completions.create(
-        model="gpt-4o-mini",
+        model=model,
         messages=[{"role": "user", "content": prompt}],
         temperature=0.9,
     )
@@ -97,19 +111,19 @@ def main(argv):
     prompt = build_prompt(mode, github, mem["topics"], mem["posted"])
     text = None
     for _ in range(3):
-        text = filter_tweet(generate(env["OPENAI_API_KEY"], prompt), mem)
+        text = filter_tweet(generate(env, prompt), mem)
         if text:
             break
     if not text:
         print("no acceptable tweet generated, skipping run")
         return 0
+    if "--dry-run" in argv:
+        print(f"[{mode}] {text}")
+        return 0
     mem["posted"].append(text)
     if len(mem["posted"]) > 500:
         mem["posted"] = mem["posted"][-500:]
     save(mem)
-    if "--dry-run" in argv:
-        print(f"[{mode}] {text}")
-        return 0
     post(env, text)
     print(f"posted ({mode}): {text}")
     return 0
